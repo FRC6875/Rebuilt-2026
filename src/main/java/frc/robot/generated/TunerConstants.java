@@ -283,4 +283,9 @@ public class TunerConstants {
             );
         }
     }
+    public static class IntakeConstants{
+        public static final int kIntakeMotorID = 15;
+        public static final double kIntateMotorSpeed = 100;
+        
+    }
 }
