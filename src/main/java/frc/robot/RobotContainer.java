@@ -26,6 +26,9 @@ import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
 import frc.robot.subsystems.Intake;
+import frc.robot.subsystems.KrakenPositionSubsystem;
+import frc.robot.commands.AutomatedClimb;
+import frc.robot.commands.SetPositionCommand;
 
 import edu.wpi.first.cscore.HttpCamera;
 
@@ -47,15 +50,25 @@ public class RobotContainer {
     private final Telemetry logger = new Telemetry(MaxSpeed);
 
     private final CommandXboxController driverController = new CommandXboxController(0);
+    private final CommandXboxController operatorController = new CommandXboxController(1);
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
      
      private final Intake Intake;
+     private final KrakenPositionSubsystem krakenSubsystem;
+
+
+      // Constants for preset positions
+        private static final double HOME_POSITION = 0.0;
+        private static final double POSITION_1 = 10.0;
+        private static final double POSITION_2 = 4.0;
+        private static final double POSITION_3 = 4.0;
+
 
     public RobotContainer() { 
       // CameraServer.startAutomaticCapture(photonCam);
       // CameraServer.addCamera(photonCam);
-
+     krakenSubsystem = new KrakenPositionSubsystem(16);
      Intake = new Intake(15);
 
         configureBindings();
@@ -97,7 +110,11 @@ public class RobotContainer {
         driverController.start().and(driverController.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
 
-    driverController.y().whileTrue( new frc.robot.commands.IntakeCommand(Intake,0.5)  );
+        operatorController.y().whileTrue( new frc.robot.commands.IntakeCommand(Intake,0.5)  );
+
+          // A button - Run automated sequence (3 full cycles)
+        operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
+        
 
 
         //if(driverController.a().onTrue){
