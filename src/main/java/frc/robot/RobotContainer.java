@@ -13,7 +13,6 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.net.PortForwarder;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.wpilibj.XboxController;
-import edu.wpi.first.wpilibj.PS4Controller.Button;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
@@ -29,6 +28,9 @@ import frc.robot.subsystems.Intake;
 import frc.robot.subsystems.KrakenPositionSubsystem;
 import frc.robot.commands.AutomatedClimb;
 import frc.robot.commands.SetPositionCommand;
+
+import frc.robot.commands.ShootCommand;
+import frc.robot.subsystems.Shoot;
 
 import edu.wpi.first.cscore.HttpCamera;
 
@@ -56,6 +58,9 @@ public class RobotContainer {
      
      private final Intake Intake;
      private final KrakenPositionSubsystem krakenSubsystem;
+     private final Shoot shoot;
+
+
 
 
       // Constants for preset positions
@@ -70,6 +75,8 @@ public class RobotContainer {
       // CameraServer.addCamera(photonCam);
      krakenSubsystem = new KrakenPositionSubsystem(16);
      Intake = new Intake(15);
+     shoot = new Shoot(/* topMotorCanId= */ 1, /* bottomMotorCanId= */ 2);
+     
 
         configureBindings();
         
@@ -114,7 +121,7 @@ public class RobotContainer {
 
           // A button - Run automated sequence (3 full cycles)
         operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
-        
+        driverController.b().onTrue(new ShootCommand(shoot));
 
 
         //if(driverController.a().onTrue){

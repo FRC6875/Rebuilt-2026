@@ -1,18 +1,27 @@
+// Copyright (c) FIRST and other WPILib contributors.
+// Open Source Software; you can modify and/or share it under the terms of
+// the WPILib BSD license file in the root directory of this project.
+
 package frc.robot.subsystems;
+
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
+
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Velocity;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj2.command.Command;
 
-public class Intake extends SubsystemBase {
-    private final TalonFX krakenMotor;
-    private final VelocityVoltage velocityVoltage;
+public class Shoot extends SubsystemBase {
+  private final TalonFX topShootMotor;
+  private final TalonFX bottomShootMotor;
+  private final VelocityVoltage velocityVoltage;
     
     // PID Constants - tune these for your mechanism
     private static final double kP = 6.0;  // Proportional gain
@@ -28,15 +37,15 @@ public class Intake extends SubsystemBase {
     
     // Gear ratio: motor rotations per mechanism rotation
     private static final double GEAR_RATIO = 15.34;
-    
-    public Intake(int canId) {
-        krakenMotor = new TalonFX(canId);
-        velocityVoltage = new VelocityVoltage(0).withSlot(0);
+  /** Creates a new Shoot. */
+  public Shoot(int topMotorCanId, int bottomMotorCanId) {
+     topShootMotor = new TalonFX(topMotorCanId);
+     bottomShootMotor = new TalonFX(bottomMotorCanId);
+     velocityVoltage = new VelocityVoltage(0).withSlot(0);
         
         configureMotor();
-    }
-    
-    private void configureMotor() {
+  }
+private void configureMotor() {
         TalonFXConfiguration config = new TalonFXConfiguration();
         
         // Configure PID gains
@@ -63,26 +72,41 @@ public class Intake extends SubsystemBase {
         config.CurrentLimits.SupplyCurrentLimitEnable = true;
         
         // Apply configuration
-        krakenMotor.getConfigurator().apply(config);
+        topShootMotor.getConfigurator().apply(config);
+        bottomShootMotor.getConfigurator().apply(config);
         
+
     }
-    
-    /**
-     * Set the target position for the motor
-     * @param rotations Target position in rotations
-     */
-    public void setVoltage(double voltage) {
-        krakenMotor.setVoltage(voltage);
+  
+    public AngularVelocity  getMotorSpeedRPS(){
+       return topShootMotor.getVelocity().getValue();
+    }
+
+    public boolean isUpToSpeed(double targetVelocityRPS, double toleranceRPS) {
+      return topShootMotor.getVelocity().isNear(targetVelocityRPS, toleranceRPS);
+    }
+
+     public void setVoltageTopShoot(double voltage) {
+        topShootMotor.setVoltage(voltage);
     }
     /**
      * Stop the motor
      */
-    public void stop() {
-        krakenMotor.stopMotor();
+    public void stopTopShoot() {
+        topShootMotor.stopMotor();
     }    
-    @Override
-    public void periodic() {
-        // This method will be called once per scheduler run
-        // You can add telemetry here
+
+    public void setVoltageBottomShoot(double voltage) {
+        bottomShootMotor.setVoltage(voltage);
     }
+    /**
+     * Stop the motor
+     */
+    public void stopBottomShoot() {
+        bottomShootMotor.stopMotor();
+    }    
+  @Override
+  public void periodic() {
+    // This method will be called once per scheduler run
+  }
 }
