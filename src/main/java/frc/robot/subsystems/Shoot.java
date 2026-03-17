@@ -9,6 +9,7 @@ import com.ctre.phoenix6.controls.NeutralOut;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.util.sendable.SendableBuilder;
@@ -26,24 +27,35 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
  *   Operator RB → ShootCommand        (spin up flywheel + engage feeder once up to speed)
  */
 public class Shoot extends SubsystemBase {
-
-    // ─────────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────
+      private final VelocityVoltage velocityVoltage;
     // Constants — tune these to match your robot
     // ─────────────────────────────────────────────────────────────────────────
     public static class ShootConstants {
 
         // ── TODO: Set CAN IDs to match your robot wiring ─────────────────────
-        public static final int kFlywheelMotorCanId = 0; // TODO: Set flywheel (top) motor CAN ID
-        public static final int kFeederMotorCanId   = 1; // TODO: Set feeder (bottom) motor CAN ID
+        public static final int kFlywheelMotorCanId = 16; // TODO: Set flywheel (top) motor CAN ID
+        public static final int kFeederMotorCanId   = 15; // TODO: Set feeder (bottom) motor CAN ID
         // ─────────────────────────────────────────────────────────────────────
 
         // Flywheel velocity PID (Slot 0) — tune on robot
-        public static final double kFlywheelP = 0.10;  // Proportional gain
+        public static final double kFlywheelP = 6.0;  // Proportional gain
         public static final double kFlywheelI = 0.00;  // Integral gain
         public static final double kFlywheelD = 0.00;  // Derivative gain
         public static final double kFlywheelS = 0.10;  // Static feedforward (V)
-        public static final double kFlywheelV = 0.12;  // Velocity feedforward (V·s/rot)
+        public static final double kFlywheelV = 1.69;  // Velocity feedforward (V·s/rot)
 
+           // Flywheel velocity PID (Slot 0) — tune on robot
+        public static final double kFeederP = 6.0;  // Proportional gain
+        public static final double kFeederI = 0.00;  // Integral gain
+        public static final double kFeederD = 0.00;  // Derivative gain
+        public static final double kFeederS = 0.10;  // Static feedforward (V)
+        public static final double kFeederV = 1.69;  // Velocity feedforw
+           // Motion constraints
+         private static final double MAX_VELOCITY = 2.0;      // rotations per second
+         private static final double MAX_ACCELERATION = 20.0; // rotations per second^2
+         private static final double MAX_JERK = 200.0;        // rotations per second^3
+    
         // ── Physics constants for distance-based speed calculation ────────────
         // 2026 game geometry — verify against the game manual
         public static final double kLaunchAngleDeg      = 60.0;   // Fixed launch angle (degrees) — TUNABLE
@@ -60,6 +72,9 @@ public class Shoot extends SubsystemBase {
         // Horizontal range limits — outside these, shooter warns or refuses
         public static final double kMinRangeMeters = 1.0;
         public static final double kMaxRangeMeters = 6.0;
+
+        // Gear ratio: motor rotations per mechanism rotation
+        private static final double GEAR_RATIO = 15.34;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -76,26 +91,57 @@ public class Shoot extends SubsystemBase {
     // ─────────────────────────────────────────────────────────────────────────
     // Constructor
     // ─────────────────────────────────────────────────────────────────────────
-    public Shoot() {
-        flywheelMotor = new TalonFX(ShootConstants.kFlywheelMotorCanId);
-        feederMotor   = new TalonFX(ShootConstants.kFeederMotorCanId);
-
+    public Shoot(int kFlywheelMotorCanID, int kFeederMotorCanID) {
+       
+       flywheelMotor = new TalonFX(ShootConstants.kFlywheelMotorCanId);
+       feederMotor   = new TalonFX(ShootConstants.kFeederMotorCanId);
+       velocityVoltage = new VelocityVoltage(0).withSlot(0);
         // ── Flywheel: PID velocity control, coasts on neutral ────────────────
+
+
         TalonFXConfiguration flywheelConfig = new TalonFXConfiguration();
         flywheelConfig.Slot0.kP = ShootConstants.kFlywheelP;
         flywheelConfig.Slot0.kI = ShootConstants.kFlywheelI;
         flywheelConfig.Slot0.kD = ShootConstants.kFlywheelD;
         flywheelConfig.Slot0.kS = ShootConstants.kFlywheelS;
         flywheelConfig.Slot0.kV = ShootConstants.kFlywheelV;
+
+        flywheelConfig.MotionMagic.MotionMagicCruiseVelocity = ShootConstants.MAX_VELOCITY;
+        flywheelConfig.MotionMagic.MotionMagicAcceleration = ShootConstants.MAX_ACCELERATION;
+        flywheelConfig.MotionMagic.MotionMagicJerk = ShootConstants.MAX_JERK;
+
+        flywheelConfig.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
+
+        flywheelConfig.CurrentLimits.SupplyCurrentLimit = 40.0;
+        flywheelConfig.CurrentLimits.SupplyCurrentLimit = 60.0;
+        flywheelConfig.CurrentLimits.SupplyCurrentLimitEnable = true;
+
         flywheelMotor.getConfigurator().apply(flywheelConfig);
         // Coast: flywheel naturally decelerates when command ends — saves wear
         flywheelMotor.setNeutralMode(NeutralModeValue.Coast);
 
         // ── Feeder: simple voltage control, brakes on neutral ────────────────
         TalonFXConfiguration feederConfig = new TalonFXConfiguration();
+        feederConfig.Slot0.kP = ShootConstants.kFeederP;
+        feederConfig.Slot0.kI = ShootConstants.kFeederI;
+        feederConfig.Slot0.kD = ShootConstants.kFeederD;
+        feederConfig.Slot0.kS = ShootConstants.kFeederS;
+        feederConfig.Slot0.kV = ShootConstants.kFeederV;
+
+        feederConfig.MotionMagic.MotionMagicCruiseVelocity = ShootConstants.MAX_VELOCITY;
+        feederConfig.MotionMagic.MotionMagicAcceleration = ShootConstants.MAX_ACCELERATION;
+        feederConfig.MotionMagic.MotionMagicJerk = ShootConstants.MAX_JERK;
+
+        feederConfig.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
+
+        feederConfig.CurrentLimits.SupplyCurrentLimit = 40.0;
+        feederConfig.CurrentLimits.SupplyCurrentLimit = 60.0;
+        feederConfig.CurrentLimits.SupplyCurrentLimitEnable = true;
+        
         feederMotor.getConfigurator().apply(feederConfig);
         // Brake: feeder stops immediately when command releases it
         feederMotor.setNeutralMode(NeutralModeValue.Brake);
+
     }
 
     // ─────────────────────────────────────────────────────────────────────────

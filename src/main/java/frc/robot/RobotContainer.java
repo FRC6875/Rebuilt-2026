@@ -24,9 +24,13 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
 import frc.robot.commands.AlignToGoalCommand;
 import frc.robot.commands.AlignToTowerCommand;
+import frc.robot.commands.AutomatedClimb;
+import frc.robot.commands.SetPositionCommand;
 import frc.robot.commands.ShootCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Intake;
+import frc.robot.subsystems.KrakenPositionSubsystem;
 import frc.robot.subsystems.Shoot;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.Telemetry;
@@ -68,13 +72,12 @@ public class RobotContainer {
     // ─────────────────────────────────────────────────────────────────────────
     private final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
     private final VisionSubsystem visionSubsystem    = new VisionSubsystem(drivetrain);
-    private final Shoot           shootSubsystem     = new Shoot();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Controllers
-    // ─────────────────────────────────────────────────────────────────────────
-    private final CommandXboxController driver   = new CommandXboxController(0);
-    private final CommandXboxController operator = new CommandXboxController(1);
+      // CONTROLLERS
+    private final CommandXboxController driverController = new CommandXboxController(0);
+    private final CommandXboxController operatorController = new CommandXboxController(1);
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // Swerve drive settings (from CTRE Tuner X generated template)
@@ -93,12 +96,30 @@ public class RobotContainer {
 
     private final Telemetry telemetry = new Telemetry(kMaxSpeed);
 
+    
+    private final Intake intake;
+    private final KrakenPositionSubsystem krakenSubsystem;
+    private final Shoot shoot;
+
+    // CLIMB POSITION CONSTANTS
+    // Contrl KrakenPositionSubsystem during auto climb
+    // TUNE: Adjust based on actual climb mechanism travel
+    private static final double HOME_POSITION = 0.0;
+    private static final double POSITION_1 = 10.0;
+    private static final double POSITION_2 = 4.0;
+    private static final double POSITION_3 = 4.0;
     // ─────────────────────────────────────────────────────────────────────────
     // Constructor
     // ─────────────────────────────────────────────────────────────────────────
     public RobotContainer() {
+         
+      krakenSubsystem = new KrakenPositionSubsystem(16);
+      intake = new Intake(15);
         configureBindings();
         putDashboard();
+        shoot = new Shoot(/* topMotorCanId= */ 1, /* bottomMotorCanId= */ 2); //FIX THIS IS FOR 2-MOTOR SHOOT; WE HAVE 1
+
+        
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -110,24 +131,24 @@ public class RobotContainer {
         drivetrain.setDefaultCommand(
             drivetrain.applyRequest(() ->
                 drive
-                    .withVelocityX(-driver.getLeftY() * kMaxSpeed)
-                    .withVelocityY(-driver.getLeftX() * kMaxSpeed)
-                    .withRotationalRate(-driver.getRightX() * kMaxAngularRate)
+                    .withVelocityX(-driverController.getLeftY() * kMaxSpeed)
+                    .withVelocityY(-driverController.getLeftX() * kMaxSpeed)
+                    .withRotationalRate(-driverController.getRightX() * kMaxAngularRate)
             )
         );
 
-        // Driver A → brake (X-lock wheels)
-        driver.a().whileTrue(drivetrain.applyRequest(() -> brake));
+        // driverController A → brake (X-lock wheels)
+        driverController.a().whileTrue(drivetrain.applyRequest(() -> brake));
 
-        // Driver B → point wheels (steer only, no translation)
-        driver.b().whileTrue(drivetrain.applyRequest(() ->
+        // driverController B → point wheels (steer only, no translation)
+        driverController.b().whileTrue(drivetrain.applyRequest(() ->
             point.withModuleDirection(
-                new Rotation2d(-driver.getLeftY(), -driver.getLeftX())
+                new Rotation2d(-driverController.getLeftY(), -driverController.getLeftX())
             )
         ));
 
-        // Driver Start → re-zero gyro toward alliance wall
-        driver.start().onTrue(new InstantCommand(() -> {
+        // driverController Start → re-zero gyro toward alliance wall
+        driverController.start().onTrue(new InstantCommand(() -> {
             Rotation2d resetAngle = Rotation2d.fromDegrees(0);
             Optional<Alliance> alliance = DriverStation.getAlliance();
             if (alliance.isPresent() && alliance.get() == Alliance.Red) {
@@ -137,46 +158,37 @@ public class RobotContainer {
             drivetrain.resetPose(new Pose2d(currentPos, resetAngle));
         }).ignoringDisable(true).withName("Zero Gyro"));
 
-        // Driver SysId bindings (for initial characterization runs)
+        // driverController SysId bindings (for initial characterization runs)
         // Back + Y/X = dynamic | Start + Y/X = quasistatic
         // These are inherited from the CTRE Tuner X generated template.
 
         // ── Operator: game bindings ───────────────────────────────────────────
 
         // Operator LB → align to goal (rotate robot + pre-spin flywheel)
-        // NOTE: Move to driver.leftBumper() if drivers prefer to control this
-        operator.leftBumper().whileTrue(
-            new AlignToGoalCommand(drivetrain, visionSubsystem, shootSubsystem)
+        // NOTE: Move to driverController.leftBumper() if driverControllers prefer to control this
+        operatorController.leftBumper().whileTrue(
+            new AlignToGoalCommand(drivetrain, visionSubsystem, shoot)
         );
 
         // Operator LT → align to tower (drive to tower + hold side-specific heading)
         // Automatically detects left/right side of tower.
         // Rejects if robot is >2m away (tunable in VisionConstants.kMaxTowerAlignDistance).
-        operator.leftTrigger().whileTrue(
+        operatorController.leftTrigger().whileTrue(
             new AlignToTowerCommand(drivetrain, visionSubsystem)
         );
 
         // Operator RB → fire shooter (flywheel + feeder once up to speed)
-        operator.rightBumper().whileTrue(
-            new ShootCommand(shootSubsystem)
+        operatorController.rightBumper().whileTrue(
+            new ShootCommand(shoot)
         );
 
-        // Operator Y → intake
-        // TODO: Replace this placeholder with your real IntakeCommand
-        operator.y().whileTrue(
-            new InstantCommand(() -> {
-                // TODO: new IntakeCommand(intakeSubsystem)
-            }).withName("IntakePlaceholder")
-        );
+        operatorController.y().whileTrue( new frc.robot.commands.IntakeCommand(intake,0.5)  );
 
-        // Operator A → climb level 3 (one-button sequence)
-        // TODO: Replace this placeholder with your climb sequence command
-        // e.g.: operator.a().onTrue(new ClimbLevel3Command(climbSubsystem));
-        operator.a().onTrue(
-            new InstantCommand(() -> {
-                // TODO: Wire to climb command when code is ready
-            }).withName("ClimbL3Placeholder")
-        );
+          // A button - Run automated sequence (3 full cycles)
+        operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
+        
+        operatorController.b().onTrue(new ShootCommand(shoot));
+        operatorController.x().onTrue(new SetPositionCommand(krakenSubsystem, POSITION_1));
 
         // Drivetrain telemetry registration
         drivetrain.registerTelemetry(telemetry::telemeterize);
