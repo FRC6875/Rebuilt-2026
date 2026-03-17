@@ -122,6 +122,8 @@ public class AlignToTowerCommand extends Command {
         rotController.setTolerance(kRotTolerance);
         xController.setTolerance(kTransTolerance);
         yController.setTolerance(kTransTolerance);
+
+        addRequirements(visionSubsystem);
     }
 
     @Override
