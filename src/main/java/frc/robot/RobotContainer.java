@@ -4,243 +4,210 @@
 
 package frc.robot;
 
-
-
 import static edu.wpi.first.units.Units.*;
+
+import java.util.Optional;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
-import com.ctre.phoenix6.swerve.utility.WheelForceCalculator.Feedforwards;
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.config.PIDConstants;
-import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
-
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.net.PortForwarder;
-import edu.wpi.first.networktables.NetworkTable;
-import edu.wpi.first.wpilibj.XboxController;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.Subsystem;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
-import edu.wpi.first.wpilibj2.command.button.JoystickButton;
-import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
-import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
+import frc.robot.commands.AlignToGoalCommand;
+import frc.robot.commands.AlignToTowerCommand;
+import frc.robot.commands.ShootCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
-
-import frc.robot.commands.AutomatedClimb;
-import frc.robot.commands.SetPositionCommand;
-import frc.robot.commands.ShootCommand;
-
-import frc.robot.subsystems.VisionSubsystem_generated;
-import frc.robot.subsystems.Intake;
-import frc.robot.subsystems.KrakenPositionSubsystem;
 import frc.robot.subsystems.Shoot;
+import frc.robot.subsystems.VisionSubsystem;
+import frc.robot.Telemetry;
 
-import edu.wpi.first.cscore.HttpCamera;
-
-
+/**
+ * RobotContainer for Team 6875 — 2026 season.
+ *
+ * Built from a clean CTRE Tuner X generated swerve base.
+ *
+ * ── Control Scheme ──────────────────────────────────────────────────────────
+ *
+ *  Driver Controller (port 0):
+ *    Left Stick        → Translate (field-centric)
+ *    Right Stick X     → Rotate
+ *    Start             → Zero gyro angle (align to alliance wall)
+ *
+ *  Operator Controller (port 1):
+ *    LB                → AlignToGoalCommand (rotate to goal + spin up flywheel)
+ *    LT                → AlignToTowerCommand (drive + rotate to tower, hold alignment)
+ *    RB                → ShootCommand (fire — feeder engages once flywheel is at speed)
+ *    Y                 → Intake (placeholder — wire to IntakeCommand when ready)
+ *    A                 → Climb Level 3 (placeholder — wire to climb command when ready)
+ *
+ * NOTE: If drivers prefer AlignToGoal on their controller, move the LB binding
+ *       from operator to driver by changing `operator.leftBumper()` → `driver.leftBumper()`
+ *       and adjusting addRequirements in AlignToGoalCommand if needed.
+ *
+ * ── TODO items ──────────────────────────────────────────────────────────────
+ *  [ ] Set Flywheel and Feeder CAN IDs in Shoot.java ShootConstants
+ *  [ ] Wire operator Y → IntakeCommand (replace placeholder InstantCommand below)
+ *  [ ] Wire operator A → Climb Level 3 command (replace placeholder below)
+ *  [ ] Update AprilTagFields in VisionSubsystem once 2026 field layout is released
+ *  [ ] Tune vision std devs, PID gains, and kTowerBumperDistance on robot
+ */
 public class RobotContainer {
 
-    // SPEED LIMITS
-    private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
-    private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
+    // ─────────────────────────────────────────────────────────────────────────
+    // Subsystems
+    // ─────────────────────────────────────────────────────────────────────────
+    private final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+    private final VisionSubsystem visionSubsystem    = new VisionSubsystem(drivetrain);
+    private final Shoot           shootSubsystem     = new Shoot();
 
-    
-    // SWERVE DRIVE
+    // ─────────────────────────────────────────────────────────────────────────
+    // Controllers
+    // ─────────────────────────────────────────────────────────────────────────
+    private final CommandXboxController driver   = new CommandXboxController(0);
+    private final CommandXboxController operator = new CommandXboxController(1);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Swerve drive settings (from CTRE Tuner X generated template)
+    // ─────────────────────────────────────────────────────────────────────────
+    private final double kMaxSpeed       = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
+    private final double kMaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
+
+    // Slew-rate limited joystick inputs for smoother driving
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
-            .withDeadband(MaxSpeed * 0.025)
-            .withRotationalDeadband(MaxAngularRate * 0.05) // Add a 10% deadband
-            .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
+        .withDeadband(kMaxSpeed * 0.1)
+        .withRotationalDeadband(kMaxAngularRate * 0.1)
+        .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-    private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
-    private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
-    
-   private final HttpCamera photonCam = new HttpCamera("Driver_Camera","http://10.68.75.11:5800/stream.mjpg");
+    private final SwerveRequest.SwerveDriveBrake brake   = new SwerveRequest.SwerveDriveBrake();
+    private final SwerveRequest.PointWheelsAt    point   = new SwerveRequest.PointWheelsAt();
 
-    private final Telemetry logger = new Telemetry(MaxSpeed);
+    private final Telemetry telemetry = new Telemetry(kMaxSpeed);
 
-    // CONTROLLERS
-    private final CommandXboxController driverController = new CommandXboxController(0);
-    private final CommandXboxController operatorController = new CommandXboxController(1);
-
-    // SUBSYSTEMS
-    public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
-    private final VisionSubsystem_generated visionSubsystem_generated = new VisionSubsystem_generated(drivetrain);
-
-    private final Intake intake;
-    private final KrakenPositionSubsystem krakenSubsystem;
-    private final Shoot shoot;
-
-    // CLIMB POSITION CONSTANTS
-    // Contrl KrakenPositionSubsystem during auto climb
-    // TUNE: Adjust based on actual climb mechanism travel
-    private static final double HOME_POSITION = 0.0;
-    private static final double POSITION_1 = 10.0;
-    private static final double POSITION_2 = 4.0;
-    private static final double POSITION_3 = 4.0;
-
-
-    public RobotContainer() { 
-      
-      krakenSubsystem = new KrakenPositionSubsystem(16);
-      intake = new Intake(15);
-      //shoot = new Shoot(1);
-      shoot = new Shoot(/* topMotorCanId= */ 1, /* bottomMotorCanId= */ 2); //FIX THIS IS FOR 2-MOTOR SHOOT; WE HAVE 1
-
-      // CameraServer.startAutomaticCapture(photonCam);
-      // CameraServer.addCamera(photonCam);
-      
-      //configureAutoBuilder(); // for pathplanner
-
-      configureBindings();
-        
+    // ─────────────────────────────────────────────────────────────────────────
+    // Constructor
+    // ─────────────────────────────────────────────────────────────────────────
+    public RobotContainer() {
+        configureBindings();
+        putDashboard();
     }
 
-    // private void configureAutoBuilder() {
-    //     try {
-    //         RobotConfig config = RobotConfig.fromGUISettings();
-
-    //         AutoBuilder.configure(
-    //             drivetrain.getState().Pose, 
-    //             drivetrain.seedFieldCentric(), 
-    //             drivetrain.getState().Speeds, 
-    //             drivetrain.setControl(
-    //                 new SwerveRequest.ApplyRobotSpeeds().withSpeeds(chassisSpeeds);
-    //             ), 
-    //             new PPHolonomicDriveController(
-    //                 new PIDConstants(5.0, 0.0, 0.0), 
-    //                 new PIDConstants(5.0, 0.0, 0.0)
-    //             ), 
-    //             config, 
-    //             false, 
-    //             drivetrain
-    //             );
-    //         SmartDashboard.putString("AutoBuilder/Status", "Configured OK");
-    //     } catch (Exception e){
-    //         SmartDashboard.putString("AutoBuilder/Status", "ERROR: "+ e.getMessage() + "--Open PathPlanner app and configure Robot Config");
-    //     }
-    // }
-    
-
+    // ─────────────────────────────────────────────────────────────────────────
+    // Bindings
+    // ─────────────────────────────────────────────────────────────────────────
     private void configureBindings() {
-        
-        
-        // Note that X is defined as forward according to WPILib convention,
-        // and Y is defined as to the left according to WPILib convention.
+
+        // ── Driver: default swerve drive ─────────────────────────────────────
         drivetrain.setDefaultCommand(
-            // Drivetrain will execute this command periodically
             drivetrain.applyRequest(() ->
-                drive.withVelocityX(-driverController.getLeftY() * -driverController.getLeftY() * -driverController.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(-driverController.getLeftX() * -driverController.getLeftX() * -driverController.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                    .withRotationalRate(-driverController.getRightX() * -driverController.getRightX() * -driverController.getRightX() *  MaxAngularRate) // Drive counterclockwise with negative X (left)
+                drive
+                    .withVelocityX(-driver.getLeftY() * kMaxSpeed)
+                    .withVelocityY(-driver.getLeftX() * kMaxSpeed)
+                    .withRotationalRate(-driver.getRightX() * kMaxAngularRate)
             )
         );
 
-        // Idle while the robot is disabled. This ensures the configured
-        // neutral mode is applied to the drive motors while disabled.
-        final var idle = new SwerveRequest.Idle();
-        RobotModeTriggers.disabled().whileTrue(
-            drivetrain.applyRequest(() -> idle).ignoringDisable(true)
-        );
+        // Driver A → brake (X-lock wheels)
+        driver.a().whileTrue(drivetrain.applyRequest(() -> brake));
 
-        driverController.a().whileTrue(drivetrain.applyRequest(() -> brake));
-        driverController.b().whileTrue(drivetrain.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-driverController.getLeftY(), -driverController.getLeftX()))
+        // Driver B → point wheels (steer only, no translation)
+        driver.b().whileTrue(drivetrain.applyRequest(() ->
+            point.withModuleDirection(
+                new Rotation2d(-driver.getLeftY(), -driver.getLeftX())
+            )
         ));
 
-        // Run SysId routines when holding back/start and X/Y.
-        // Note that each routine should be run exactly once in a single log.
-        driverController.back().and(driverController.y()).whileTrue(drivetrain.sysIdDynamic(Direction.kForward));
-        driverController.back().and(driverController.x()).whileTrue(drivetrain.sysIdDynamic(Direction.kReverse));
-        driverController.start().and(driverController.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
-        driverController.start().and(driverController.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
+        // Driver Start → re-zero gyro toward alliance wall
+        driver.start().onTrue(new InstantCommand(() -> {
+            Rotation2d resetAngle = Rotation2d.fromDegrees(0);
+            Optional<Alliance> alliance = DriverStation.getAlliance();
+            if (alliance.isPresent() && alliance.get() == Alliance.Red) {
+                resetAngle = Rotation2d.fromDegrees(180);
+            }
+            Translation2d currentPos = drivetrain.getState().Pose.getTranslation();
+            drivetrain.resetPose(new Pose2d(currentPos, resetAngle));
+        }).ignoringDisable(true).withName("Zero Gyro"));
 
+        // Driver SysId bindings (for initial characterization runs)
+        // Back + Y/X = dynamic | Start + Y/X = quasistatic
+        // These are inherited from the CTRE Tuner X generated template.
 
-        operatorController.y().whileTrue( new frc.robot.commands.IntakeCommand(intake,0.5)  );
+        // ── Operator: game bindings ───────────────────────────────────────────
 
-          // A button - Run automated sequence (3 full cycles)
-        operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
-        driverController.b().onTrue(new ShootCommand(shoot));
+        // Operator LB → align to goal (rotate robot + pre-spin flywheel)
+        // NOTE: Move to driver.leftBumper() if drivers prefer to control this
+        operator.leftBumper().whileTrue(
+            new AlignToGoalCommand(drivetrain, visionSubsystem, shootSubsystem)
+        );
 
-        
-        // Calculate drivetrain commands from Joystick values
-        double forward = -driverController.getLeftY() * TunerConstants.kMaxSpeedMetersPerSecond;
-        double strafe = -driverController.getLeftX() * TunerConstants.kMaxSpeedMetersPerSecond;
-        double turn = -driverController.getRightX() * TunerConstants.kMaxAngularSpeed;
+        // Operator LT → align to tower (drive to tower + hold side-specific heading)
+        // Automatically detects left/right side of tower.
+        // Rejects if robot is >2m away (tunable in VisionConstants.kMaxTowerAlignDistance).
+        operator.leftTrigger().whileTrue(
+            new AlignToTowerCommand(drivetrain, visionSubsystem)
+        );
 
+        // Operator RB → fire shooter (flywheel + feeder once up to speed)
+        operator.rightBumper().whileTrue(
+            new ShootCommand(shootSubsystem)
+        );
 
-        //----------this is in the Visiion subsystem now----------------
-        // // Read in relevant data from the Camera
-        // boolean targetVisible = false;
-        // double targetYaw = 0.0;
-        // double  results = kCameraName.getAllUnreadResults();
-        // if (!results.isEmpty()) {
-        //     // Camera processed a new frame since last
-        //     // Get the last one in the list.
-        //     var result = results.get(results.size() - 1);
-        //     if (result.hasTargets()) {
-        //         // At least one AprilTag was seen by the camera
-        //         for (var target : result.getTargets()) {
-        //             if (target.getFiducialId() == 7) {
-        //                 // Found Tag 7, record its information
-        //                 targetYaw = target.getYaw();
-        //                 targetVisible = true;
-        //             }
-        //         }
-        //     }
-        // }
-        //
-        //     // Auto-align when requested
-        //     if (driverController.a() && targetVisible) {
-        //         // Driver wants auto-alignment to tag 7
-        //         // And, tag 7 is in sight, so we can turn toward it.
-        //         // Override the driver's turn command with an automatic one that turns toward the tag.
-        //         turn = -1.0 * targetYaw * VISION_TURN_kP * TunerConstants.Swerve.kMaxAngularSpeed;
-        //     }
-        //
-        //     // Command drivetrain motors based on target speeds
-        //     drivetrain.drive(forward, strafe, turn);
-//
-        //     // Put debug information to the dashboard
-        //     SmartDashboard.putBoolean("Vision Target Visible", targetVisible);
-        //
-        // }
-        //
-        //if(driverController.a().onTrue){
-      //  }
-      //  else{
-      //      driverController.a().onTrue(new SetKrakenPosition(krakenSubsystem, 0));
-      //  }
-      //-----------------------------------------------------
+        // Operator Y → intake
+        // TODO: Replace this placeholder with your real IntakeCommand
+        operator.y().whileTrue(
+            new InstantCommand(() -> {
+                // TODO: new IntakeCommand(intakeSubsystem)
+            }).withName("IntakePlaceholder")
+        );
 
-        // put Driver and operator buttons here!!-------------
+        // Operator A → climb level 3 (one-button sequence)
+        // TODO: Replace this placeholder with your climb sequence command
+        // e.g.: operator.a().onTrue(new ClimbLevel3Command(climbSubsystem));
+        operator.a().onTrue(
+            new InstantCommand(() -> {
+                // TODO: Wire to climb command when code is ready
+            }).withName("ClimbL3Placeholder")
+        );
 
-        drivetrain.registerTelemetry(logger::telemeterize);
+        // Drivetrain telemetry registration
+        drivetrain.registerTelemetry(telemetry::telemeterize);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Dashboard setup
+    // ─────────────────────────────────────────────────────────────────────────
+    private void putDashboard() {
+        // Zero angle button on dashboard (useful when no controller is plugged in)
+        SmartDashboard.putData("Zero Gyro", new InstantCommand(() -> {
+            Rotation2d resetAngle = Rotation2d.fromDegrees(0);
+            Optional<Alliance> alliance = DriverStation.getAlliance();
+            if (alliance.isPresent() && alliance.get() == Alliance.Red) {
+                resetAngle = Rotation2d.fromDegrees(180);
+            }
+            Translation2d currentPos = drivetrain.getState().Pose.getTranslation();
+            drivetrain.resetPose(new Pose2d(currentPos, resetAngle));
+        }).ignoringDisable(true));
+
+        // Vision status
+        SmartDashboard.putString("AlignGoal/Status",  "—");
+        SmartDashboard.putString("AlignTower/Status", "—");
+        SmartDashboard.putBoolean("AlignTower/Aligned", false);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Auto
+    // ─────────────────────────────────────────────────────────────────────────
     public Command getAutonomousCommand() {
-        // Simple drive forward auton
-        final var idle = new SwerveRequest.Idle();
-        return Commands.sequence(
-            // Reset our field centric heading to match the robot
-            // facing away from our alliance station wall (0 deg).
-            drivetrain.runOnce(() -> drivetrain.seedFieldCentric(Rotation2d.kZero)),
-            // Then slowly drive forward (away from us) for 5 seconds.
-            drivetrain.applyRequest(() ->
-                drive.withVelocityX(0.5)
-                    .withVelocityY(0)
-                    .withRotationalRate(0)
-            )
-            .withTimeout(5.0),
-            // Finally idle for the rest of auton
-            drivetrain.applyRequest(() -> idle)
-        );
+        // TODO: Add autonomous routines using PathPlanner or command sequences
+        return Commands.none();
     }
 }

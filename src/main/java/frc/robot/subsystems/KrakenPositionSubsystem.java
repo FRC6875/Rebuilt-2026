@@ -130,7 +130,7 @@ public class KrakenPositionSubsystem extends SubsystemBase {
     public Command moveToPosition(double targetRotations) {
         return runOnce(() -> setPosition(targetRotations))
             .andThen(run(() -> {}))
-            .until(() -> atTarget(0))
+            .until(() -> atTarget(1))
             .withName("MoveToPosition_" + targetRotations);
     }
     
