@@ -12,9 +12,9 @@ public class ShootCommand extends Command {
     private final Shoot shootSubsystem;
 
     // Tunable constants - adjust these to match your robot
-    private static final double TOP_MOTOR_VOLTAGE    = 8.0;  // Volts to run top motor
-    private static final double BOTTOM_MOTOR_VOLTAGE = 8.0;  // Volts to run bottom motor
-    private static final double TARGET_VELOCITY_RPS  = 96.416; // Target speed in rotations/sec
+    private static final double TOP_MOTOR_VOLTAGE    = 6.0;  // Volts to run top motor
+    private static final double BOTTOM_MOTOR_VOLTAGE = 6.0;  // Volts to run bottom motor
+    private static final double TARGET_VELOCITY_RPS  = 30.0; // Target speed in rotations/sec
     private static final double TOLERANCE_RPS        = 2.0;  // Acceptable speed tolerance
 
     public ShootCommand(Shoot shootSubsystem) {

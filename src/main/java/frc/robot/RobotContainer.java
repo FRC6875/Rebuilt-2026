@@ -89,10 +89,10 @@ public class RobotContainer {
 
     public RobotContainer() { 
       
-      krakenSubsystem = new KrakenPositionSubsystem(16);
-      intake = new Intake(15);
+      krakenSubsystem = new KrakenPositionSubsystem(17);
+      intake = new Intake(14);
       //shoot = new Shoot(1);
-      shoot = new Shoot(/* topMotorCanId= */ 1, /* bottomMotorCanId= */ 2); //FIX THIS IS FOR 2-MOTOR SHOOT; WE HAVE 1
+      shoot = new Shoot(/* topMotorCanId= */ 16, /* bottomMotorCanId= */ 15); //FIX THIS IS FOR 2-MOTOR SHOOT; WE HAVE 1
 
       // CameraServer.startAutomaticCapture(photonCam);
       // CameraServer.addCamera(photonCam);
@@ -163,11 +163,11 @@ public class RobotContainer {
         driverController.start().and(driverController.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
 
-        operatorController.y().whileTrue( new frc.robot.commands.IntakeCommand(intake,0.5)  );
-
+        operatorController.y().whileTrue( new frc.robot.commands.IntakeCommand(intake,3)  );
+        operatorController.x().whileTrue( new frc.robot.commands.IntakeCommand(intake,-3)  );
           // A button - Run automated sequence (3 full cycles)
-        operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
-        driverController.b().onTrue(new ShootCommand(shoot));
+        //operatorController.a().onTrue( new AutomatedClimb( krakenSubsystem, POSITION_1, POSITION_2, POSITION_3, HOME_POSITION));
+        operatorController.b().whileTrue(new ShootCommand(shoot));
 
         
         // Calculate drivetrain commands from Joystick values

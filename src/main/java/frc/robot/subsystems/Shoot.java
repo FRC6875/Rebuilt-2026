@@ -31,8 +31,8 @@ public class Shoot extends SubsystemBase {
     private static final double kV = 1.69;   // Velocity feedforward 1.69
     
     // Motion constraints
-    private static final double MAX_VELOCITY = 2.0;      // rotations per second
-    private static final double MAX_ACCELERATION = 20.0; // rotations per second^2
+    private static final double MAX_VELOCITY = 1.0;      // rotations per second
+    private static final double MAX_ACCELERATION = 10.0; // rotations per second^2
     private static final double MAX_JERK = 200.0;        // rotations per second^3
     
     // Gear ratio: motor rotations per mechanism rotation
@@ -62,7 +62,7 @@ private void configureMotor() {
         
         // Configure motor output
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
-        config.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
+        config.MotorOutput.Inverted = InvertedValue.Clockwise_Positive;
      // Set to true if motor is inverted
         
         // Configure current limits (optional but recommended)
